@@ -48,7 +48,33 @@ Dish names and prices are saved as snapshots. Totals are calculated in the backe
 .\mvnw.cmd test
 ```
 
-This first stage is for local learning. Authentication, Docker, GitHub Actions, Helm, and Kubernetes come later. Browser requests go through the Angular development proxy.
+This application is for local learning. Browser requests go through the Angular development proxy. Authentication, Helm, and Kubernetes come later.
+
+## Docker
+
+Start Docker Desktop and build from this directory:
+
+```powershell
+docker build -t restaurant-order:local .
+```
+
+The first stage uses the Maven Wrapper to test and build the JAR. The final stage runs it with Java 17 as a non-root user.
+
+With menu-service running on your Windows computer on port 8081:
+
+```powershell
+docker run -d --name restaurant-order -p 8082:8082 -e MENU_SERVICE_URL=http://host.docker.internal:8081 -v restaurant-order-data:/app/data restaurant-order:local
+```
+
+Stop the IntelliJ order-service instance first to free port 8082, or use `-p 7000:8082` and access the container through `localhost:7000` instead.
+`MENU_SERVICE_URL` lets Feign reach menu-service on your computer through Docker Desktop.
+The named volume keeps the container's H2 database after the container is removed. It starts separately from your IntelliJ database. Only one container should use this H2 volume at a time.
+
+```powershell
+docker logs restaurant-order
+docker stop restaurant-order
+docker rm restaurant-order
+```
 
 ## Verification in the creation session
 
