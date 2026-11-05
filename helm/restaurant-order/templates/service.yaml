@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "restaurant-order.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "restaurant-order.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: {{ .Values.service.port }}
+      targetPort: http
+  selector:
+    {{- include "restaurant-order.selectorLabels" . | nindent 4 }}

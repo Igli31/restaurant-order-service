@@ -1,0 +1,13 @@
+Order-service release: {{ .Release.Name }}
+Namespace: {{ .Release.Namespace }}
+Image: {{ .Values.image.repository }}:{{ .Values.image.tag }}
+
+Inspect the deployment:
+  kubectl get pods,svc,pvc -n {{ .Release.Namespace }}
+
+Access from your computer (keep this command running):
+  kubectl port-forward -n {{ .Release.Namespace }} service/{{ include "restaurant-order.fullname" . }} 18082:{{ .Values.service.port }}
+
+Then open http://localhost:18082/api/orders
+
+Placing orders also requires menu-service at {{ .Values.menuServiceUrl }}.
