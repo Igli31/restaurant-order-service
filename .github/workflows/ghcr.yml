@@ -48,3 +48,8 @@ jobs:
         run: |
           docker push "$IMAGE_NAME:sha-$GITHUB_SHA"
           docker push "$IMAGE_NAME:development"
+
+  deploy-development:
+    name: Deploy development
+    needs: publish
+    uses: ./.github/workflows/cd.yml

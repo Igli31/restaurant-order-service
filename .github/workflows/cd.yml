@@ -1,0 +1,79 @@
+name: Order service CD
+
+# Called by ghcr.yml only after its publish job succeeds.
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy order-service to development
+    if: github.event_name == 'push' && github.ref == 'refs/heads/development'
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 15
+    concurrency:
+      group: order-deploy-development
+      cancel-in-progress: false
+    defaults:
+      run:
+        shell: powershell
+    env:
+      # A local reusable workflow uses the same commit as its caller.
+      IMAGE_TAG: sha-${{ github.sha }}
+
+    steps:
+      - name: Check out the exact published commit
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Check runner tools and cluster access
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Get-Command helm, kubectl -ErrorAction Stop | Select-Object Name, Source
+          $helmVersion = helm version --short
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ($helmVersion -notmatch '^v4\.') { throw 'This workflow requires Helm 4.' }
+          Write-Output "Helm: $helmVersion"
+          kubectl --context docker-desktop get namespace development
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          kubectl --context docker-desktop --namespace development get secret ghcr-pull -o name
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (!(Test-Path './helm/restaurant-order/Chart.yaml')) { throw 'Order Helm chart is missing.' }
+
+      - name: Validate the chart with the published image tag
+        run: |
+          helm lint ./helm/restaurant-order --strict `
+            -f ./helm/restaurant-order/values-development.yaml `
+            --set-string "image.tag=$env:IMAGE_TAG"
+
+      - name: Deploy with Helm
+        run: |
+          helm upgrade --install restaurant-order ./helm/restaurant-order `
+            --kube-context docker-desktop `
+            --namespace development `
+            -f ./helm/restaurant-order/values-development.yaml `
+            --set-string "image.tag=$env:IMAGE_TAG" `
+            --wait --timeout 5m --rollback-on-failure --history-max 10
+
+      - name: Verify the deployed image and rollout
+        run: |
+          $ErrorActionPreference = 'Stop'
+          kubectl --context docker-desktop --namespace development rollout status deployment/restaurant-order --timeout=120s
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $actualImage = kubectl --context docker-desktop --namespace development get deployment restaurant-order -o 'jsonpath={.spec.template.spec.containers[0].image}'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $expectedImage = "ghcr.io/igli31/restaurant-order-service:$env:IMAGE_TAG"
+          if ($actualImage -ne $expectedImage) { throw "Expected $expectedImage but found $actualImage" }
+          Write-Output "Deployed: $actualImage"
+
+      - name: Show diagnostics if deployment fails
+        if: failure()
+        run: |
+          kubectl --context docker-desktop --namespace development get pods,svc,pvc
+          kubectl --context docker-desktop --namespace development describe deployment restaurant-order
+          kubectl --context docker-desktop --namespace development get events --sort-by=.lastTimestamp
+          kubectl --context docker-desktop --namespace development logs deployment/restaurant-order --tail=100
