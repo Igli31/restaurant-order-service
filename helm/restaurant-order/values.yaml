@@ -1,0 +1,27 @@
+image:
+  repository: ghcr.io/igli31/restaurant-order-service
+  # The exact development image already published to GHCR.
+  tag: sha-f0080423795d5ab077c63d6da3e2f60400e55193
+  pullPolicy: IfNotPresent
+
+# Create this registry Secret separately in each namespace before installing.
+imagePullSecrets:
+  - name: ghcr-pull
+
+service:
+  port: 8082
+
+menuServiceUrl: http://restaurant-menu:8081
+
+persistence:
+  size: 1Gi
+  # Empty uses the cluster's default StorageClass (Docker Desktop provides one).
+  storageClass: ""
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: "1"
+    memory: 768Mi
