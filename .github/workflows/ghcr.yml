@@ -1,0 +1,55 @@
+name: Publish order image
+
+on:
+  push:
+    branches: [development]
+
+permissions:
+  contents: read
+
+# Publish development images one at a time so their tags stay consistent.
+concurrency:
+  group: ghcr-development
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Build and publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v6
+
+      - name: Set the image name
+        run: echo "IMAGE_NAME=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # The Dockerfile runs Maven verify, including tests, before producing the image.
+      - name: Build and test the image
+        run: |
+          docker build \
+            --label "org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
+            --tag "$IMAGE_NAME:sha-$GITHUB_SHA" \
+            --tag "$IMAGE_NAME:development" \
+            .
+
+      - name: Publish the image
+        run: |
+          docker push "$IMAGE_NAME:sha-$GITHUB_SHA"
+          docker push "$IMAGE_NAME:development"
+
+  deploy-development:
+    name: Deploy development
+    needs: publish
+    uses: ./.github/workflows/cd.yml
