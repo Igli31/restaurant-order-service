@@ -1,6 +1,7 @@
 package com.restaurant.order.controller;
 
 import com.restaurant.order.dto.*;
+import com.restaurant.order.entity.OrderStatus;
 import com.restaurant.order.service.OrderService;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
@@ -20,8 +21,8 @@ public class OrderController {
     }
 
     @GetMapping
-    public List<OrderResponse> getAll() {
-        return service.getAll();
+    public List<OrderResponse> getAll(@RequestParam(required = false) OrderStatus status) {
+        return service.getAll(status);
     }
 
     @GetMapping("/{id}")

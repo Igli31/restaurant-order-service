@@ -42,8 +42,9 @@ public class OrderServiceImpl implements OrderService {
         return dto;
     }
 
-    public List<OrderResponse> getAll() {
-        return orders.findAll().stream()
+    public List<OrderResponse> getAll(OrderStatus status) {
+        var matchingOrders = status == null ? orders.findAll() : orders.findByStatus(status);
+        return matchingOrders.stream()
                 .sorted(Comparator.comparing(RestaurantOrder::getCreatedAt).reversed())
                 .map(this::response).toList();
     }
