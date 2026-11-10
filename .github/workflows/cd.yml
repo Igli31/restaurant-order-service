@@ -9,12 +9,12 @@ permissions:
 
 jobs:
   deploy:
-    name: Deploy order-service to development
-    if: github.event_name == 'push' && github.ref == 'refs/heads/development'
+    name: Deploy order-service to ${{ github.ref_name }}
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/development' || github.ref == 'refs/heads/testing')
     runs-on: [self-hosted, Windows, X64]
     timeout-minutes: 15
     concurrency:
-      group: order-deploy-development
+      group: order-deploy-${{ github.ref_name }}
       cancel-in-progress: false
     defaults:
       run:
@@ -22,6 +22,7 @@ jobs:
     env:
       # A local reusable workflow uses the same commit as its caller.
       IMAGE_TAG: sha-${{ github.sha }}
+      DEPLOY_NAMESPACE: ${{ github.ref_name }}
 
     steps:
       - name: Check out the exact published commit
@@ -33,47 +34,50 @@ jobs:
       - name: Check runner tools and cluster access
         run: |
           $ErrorActionPreference = 'Stop'
+          if ($env:DEPLOY_NAMESPACE -notin @('development', 'testing')) { throw 'Unsupported deployment namespace.' }
           Get-Command helm, kubectl -ErrorAction Stop | Select-Object Name, Source
           $helmVersion = helm version --short
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           if ($helmVersion -notmatch '^v4\.') { throw 'This workflow requires Helm 4.' }
           Write-Output "Helm: $helmVersion"
-          kubectl --context docker-desktop get namespace development
+          kubectl --context docker-desktop get namespace $env:DEPLOY_NAMESPACE
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          kubectl --context docker-desktop --namespace development get secret ghcr-pull -o name
+          kubectl --context docker-desktop --namespace $env:DEPLOY_NAMESPACE get secret ghcr-pull -o name
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           if (!(Test-Path './helm/restaurant-order/Chart.yaml')) { throw 'Order Helm chart is missing.' }
+          $valuesFile = "./helm/restaurant-order/values-${env:DEPLOY_NAMESPACE}.yaml"
+          if (!(Test-Path $valuesFile)) { throw "Missing environment values: $valuesFile" }
 
       - name: Validate the chart with the published image tag
         run: |
           helm lint ./helm/restaurant-order --strict `
-            -f ./helm/restaurant-order/values-development.yaml `
+            -f "./helm/restaurant-order/values-${env:DEPLOY_NAMESPACE}.yaml" `
             --set-string "image.tag=$env:IMAGE_TAG"
 
       - name: Deploy with Helm
         run: |
           helm upgrade --install restaurant-order ./helm/restaurant-order `
             --kube-context docker-desktop `
-            --namespace development `
-            -f ./helm/restaurant-order/values-development.yaml `
+            --namespace $env:DEPLOY_NAMESPACE `
+            -f "./helm/restaurant-order/values-${env:DEPLOY_NAMESPACE}.yaml" `
             --set-string "image.tag=$env:IMAGE_TAG" `
             --wait --timeout 5m --rollback-on-failure --history-max 10
 
       - name: Verify the deployed image and rollout
         run: |
           $ErrorActionPreference = 'Stop'
-          kubectl --context docker-desktop --namespace development rollout status deployment/restaurant-order --timeout=120s
+          kubectl --context docker-desktop --namespace $env:DEPLOY_NAMESPACE rollout status deployment/restaurant-order --timeout=120s
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $actualImage = kubectl --context docker-desktop --namespace development get deployment restaurant-order -o 'jsonpath={.spec.template.spec.containers[0].image}'
+          $actualImage = kubectl --context docker-desktop --namespace $env:DEPLOY_NAMESPACE get deployment restaurant-order -o 'jsonpath={.spec.template.spec.containers[0].image}'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $expectedImage = "ghcr.io/igli31/restaurant-order-service:$env:IMAGE_TAG"
           if ($actualImage -ne $expectedImage) { throw "Expected $expectedImage but found $actualImage" }
-          Write-Output "Deployed: $actualImage"
+          Write-Output "Deployed to ${env:DEPLOY_NAMESPACE}: $actualImage"
 
       - name: Show diagnostics if deployment fails
         if: failure()
         run: |
-          kubectl --context docker-desktop --namespace development get pods,svc,pvc
-          kubectl --context docker-desktop --namespace development describe deployment restaurant-order
-          kubectl --context docker-desktop --namespace development get events --sort-by=.lastTimestamp
-          kubectl --context docker-desktop --namespace development logs deployment/restaurant-order --tail=100
+          kubectl --context docker-desktop --namespace $env:DEPLOY_NAMESPACE get pods,svc,pvc
+          kubectl --context docker-desktop --namespace $env:DEPLOY_NAMESPACE describe deployment restaurant-order
+          kubectl --context docker-desktop --namespace $env:DEPLOY_NAMESPACE get events --sort-by=.lastTimestamp
+          kubectl --context docker-desktop --namespace $env:DEPLOY_NAMESPACE logs deployment/restaurant-order --tail=100

@@ -1,19 +1,20 @@
-# Automatic order-service development deployment
+# Automatic order-service development and testing deployment
 
 ## Sequence
 
 1. Work on a feature branch created from main; commit and push it.
-2. Check out development, pull, merge the feature, then push development.
+2. Check out the target branch (development or testing), pull, merge this same
+   feature branch directly into it, then push that target branch.
 3. GitHub runs the existing CI workflow and the GHCR workflow.
 4. The GHCR job builds/tests the Dockerfile and publishes the commit's SHA tag.
 5. Only after that job succeeds, it calls `.github/workflows/cd.yml`.
 6. CD checks out that exact commit on your Windows self-hosted runner and runs
-   Helm against Docker Desktop Kubernetes's development namespace.
+   Helm against Docker Desktop Kubernetes's matching namespace.
 7. CD verifies the rollout and that the expected image is selected.
 
 The separate CI workflow also runs, but CD is gated by the publishing job's
 success. That publishing job itself runs the Maven tests through the Dockerfile.
-Neither feature pushes nor pull requests run CD. Testing/production CD comes later.
+Neither feature pushes nor pull requests run CD. Production CD comes later.
 
 ## Why two workflow files change
 
@@ -36,8 +37,9 @@ the repository's default main branch first.
 - Helm 4, kubectl, and Git are available on the runner's PATH. Restart the runner
   after changing its environment variables or installing missing tools.
 - Your Windows user's kubeconfig includes the `docker-desktop` context.
-- The development namespace and `ghcr-pull` registry Secret already exist.
-- The order Helm chart exists on development; it has already been tested there.
+- Both target namespaces exist, with a valid `ghcr-pull` Secret in each.
+- Each target Git branch must contain the Dockerfile, chart, and environment
+  values before pushing. Testing still needs its prerequisite feature merges.
 
 No kubeconfig or registry token is committed. The runner uses your local cluster
 credentials; Kubernetes uses its existing registry Secret to download the image.
@@ -47,14 +49,14 @@ terminal's currently selected context.
 Keep run.cmd open for now. If the runner is offline, GitHub queues the deployment;
 already deployed Pods continue running while Docker Desktop runs. Build/test and
 publishing stay on GitHub-hosted Ubuntu runners. Do not route untrusted PR jobs to
-this laptop runner. These deployment jobs run trusted development pushes only.
+this laptop runner. These deployment jobs run trusted development or testing pushes only.
 
 ## Image and chart versions
 
 Helm receives `--set-string image.tag=sha-<commit>` for the image just published.
 This overrides the earlier manually pinned image in the values file for this
 installation; it does not rewrite or commit values.yaml. Environment settings
-still come from values-development.yaml. Chart.yaml's chart version should be
+come from values-development.yaml or values-testing.yaml according to the branch. Chart.yaml's chart version should be
 incremented when chart configuration changes; no Git tag is required to trigger
 this push-based deployment.
 
@@ -66,7 +68,7 @@ database changes or restore old data.
 ## Verify after the first merge and push
 
 In GitHub Actions, open Publish order image. After Build and publish succeeds,
-Deploy development runs on the laptop. The final step prints the expected SHA
+Deploy development or Deploy testing runs on the laptop. The final step prints the expected SHA
 image. Then inspect from your own terminal:
 
 ```powershell
@@ -83,3 +85,31 @@ placement still needs the menu-service and is checked through the frontend.
 
 References: [Reusable workflows](https://docs.github.com/en/actions/reference/workflows-and-actions/reusing-workflow-configurations),
 [Helm upgrade](https://helm.sh/docs/helm/helm_upgrade/).
+
+## Environment selection and first testing deployment
+
+Pushes to development publish the development image alias and deploy into the
+development namespace. Pushes to testing publish the testing alias and deploy
+into testing. Both also publish sha-<commit>; Helm deploys that exact SHA tag.
+The namespace and values file come from the branch name. No release tag is needed.
+
+Continue using this existing feature/cd branch: commit and push it, merge into
+development, verify it, then merge the same feature directly into testing. Do not
+merge development into testing. Testing must first receive the CI, Docker, GHCR,
+and Helm features too; stop on any merge conflict and resolve it before pushing.
+
+Each namespace has separate Pods, Services, and H2 database storage. The existing
+order runner can deploy to either namespace. Feign reaches restaurant-menu in
+that same namespace; testing order placement needs testing menu-service deployed.
+
+A push to testing builds its merged commit rather than automatically promoting
+the identical binary digest previously built from development. This is our chosen
+branch-push pipeline, distinct from a build-once artifact promotion pipeline.
+
+Inspect testing after deployment:
+
+```powershell
+kubectl --context docker-desktop get pods,svc,pvc -n testing
+helm list --kube-context docker-desktop -n testing
+kubectl --context docker-desktop -n testing get deployment restaurant-order -o 'jsonpath={.spec.template.spec.containers[0].image}'
+```

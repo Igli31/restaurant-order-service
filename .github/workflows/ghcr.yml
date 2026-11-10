@@ -2,14 +2,14 @@ name: Publish order image
 
 on:
   push:
-    branches: [development]
+    branches: [development, testing]
 
 permissions:
   contents: read
 
-# Publish development images one at a time so their tags stay consistent.
+# Serialize publishing and deployment separately for each target branch.
 concurrency:
-  group: ghcr-development
+  group: ghcr-${{ github.ref_name }}
   cancel-in-progress: false
 
 jobs:
@@ -41,15 +41,15 @@ jobs:
           docker build \
             --label "org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
             --tag "$IMAGE_NAME:sha-$GITHUB_SHA" \
-            --tag "$IMAGE_NAME:development" \
+            --tag "$IMAGE_NAME:$GITHUB_REF_NAME" \
             .
 
       - name: Publish the image
         run: |
           docker push "$IMAGE_NAME:sha-$GITHUB_SHA"
-          docker push "$IMAGE_NAME:development"
+          docker push "$IMAGE_NAME:$GITHUB_REF_NAME"
 
-  deploy-development:
-    name: Deploy development
+  deploy-environment:
+    name: Deploy ${{ github.ref_name }}
     needs: publish
     uses: ./.github/workflows/cd.yml
