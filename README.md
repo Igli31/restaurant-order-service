@@ -29,7 +29,8 @@ Each service owns a separate file-based H2 database under data/ (ignored by Git)
 
 ## Endpoints
 
-- GET /api/orders
+- GET /api/orders — all orders, newest first.
+- GET /api/orders?status=PLACED — only orders with that status, newest first.
 - GET /api/orders/{id}
 - POST /api/orders
 - PATCH /api/orders/{id}/status
@@ -39,6 +40,8 @@ Create example:
 {"customerName":"Alex","tableNumber":2,"items":[{"dishId":1,"quantity":2}]}
 ```
 Status example: {"status":"PREPARING"}.
+The optional status filter accepts PLACED, PREPARING, SERVED, or CANCELLED (uppercase).
+Omit it to return all orders. A status with no matching orders returns an empty list; an invalid value returns HTTP 400.
 Transitions: PLACED -> PREPARING or CANCELLED; PREPARING -> SERVED or CANCELLED. Terminal orders cannot change status.
 Dish names and prices are saved as snapshots. Totals are calculated in the backend. Each order has 1-50 lines; quantities are 1-100. Network failures prevent the order from being saved.
 
